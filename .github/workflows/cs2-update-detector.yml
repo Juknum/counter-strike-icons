@@ -1,0 +1,77 @@
+name: "CS2 › 1. Detect Build Update"
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    name: Check for new CS2 build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── SteamCMD setup ──────────────────────────────────────────────────────
+      - name: Install SteamCMD
+        run: |
+          sudo apt-get install -y lib32gcc-s1
+          mkdir -p ~/steamcmd
+          curl -sSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz \
+            | tar xz -C ~/steamcmd
+
+      # ── Build ID fetch ───────────────────────────────────────────────────────
+      - name: Fetch current CS2 build ID
+        id: build
+        run: |
+          STORED=$(cat cs2_version.txt 2>/dev/null || echo "0")
+          
+          ~/steamcmd/steamcmd.sh \
+            +login anonymous \
+            +app_info_update 1 \
+            +app_info_print 730 \
+            +quit 2>/dev/null \
+            | grep -A2 '"public"' \
+            | grep '"buildid"' \
+            | awk '{print $2}' \
+            | tr -d '"' > cs2_version.txt
+
+          CURRENT=$(cat cs2_version.txt)
+
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "stored=$STORED"   >> $GITHUB_OUTPUT
+
+          if [ "$CURRENT" != "$STORED" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "::notice::New CS2 build detected: $CURRENT (was $STORED)"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "::notice::No update — build $CURRENT is unchanged"
+          fi
+
+      # ── Persist the new build ID ─────────────────────────────────────────────
+      - name: Commit updated build ID
+        if: steps.build.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cs2_version.txt
+          git commit -m "chore: CS2 build ${{ steps.build.outputs.current }} detected"
+          git push
+
+      # ── Trigger the extraction workflow ─────────────────────────────────────
+      # Uses the built-in GITHUB_TOKEN — no PAT needed.
+      # The "extract" workflow must exist in the default branch before this fires.
+      - name: Trigger SVG extraction workflow
+        if: steps.build.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run cs2-extract-media.yml \
+            --ref "${{ github.ref_name }}" \
+            --field build_id="${{ steps.build.outputs.current }}"

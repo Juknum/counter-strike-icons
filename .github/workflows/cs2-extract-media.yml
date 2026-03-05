@@ -1,0 +1,253 @@
+name: "CS2 › 2. Extract SVGs"
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: "CS2 build ID to extract (leave blank to use last known)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    name: Detect chunks & extract SVGs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── Resolve build ID ─────────────────────────────────────────────────────
+      - name: Resolve build ID
+        id: meta
+        run: |
+          if [ -n "${{ inputs.build_id }}" ]; then
+            BUILD="${{ inputs.build_id }}"
+          else
+            BUILD=$(cat last_build.txt 2>/dev/null || echo "unknown")
+          fi
+          echo "build_id=$BUILD" >> $GITHUB_OUTPUT
+          echo "::notice::Extracting SVGs for build $BUILD"
+
+      # ── DepotDownloader setup ────────────────────────────────────────────────
+      # DepotDownloader is a standalone binary release, not a dotnet global tool.
+      # Releases: https://github.com/SteamRE/DepotDownloader/releases
+      - name: Install DepotDownloader
+        run: |
+          DD_VERSION=$(curl -s https://api.github.com/repos/SteamRE/DepotDownloader/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          curl -sL "https://github.com/SteamRE/DepotDownloader/releases/download/${DD_VERSION}/DepotDownloader-linux-x64.zip" \
+            -o /tmp/depotdownloader.zip
+          unzip -q /tmp/depotdownloader.zip -d /tmp/depotdownloader
+          sudo mv /tmp/depotdownloader/DepotDownloader /usr/local/bin/DepotDownloader
+          sudo chmod +x /usr/local/bin/DepotDownloader
+
+      # ── Step 1 — download the index only ─────────────────────────────────────
+      # pak01_dir.vpk is the VPK index file. We parse it first to find exactly
+      # which _NNN.vpk chunks hold .vsvg_c data before downloading anything else.
+      # Requires STEAM_USERNAME and STEAM_PASSWORD repo secrets (any free Steam
+      # account works — CS2 is free-to-play so no ownership is required).
+      - name: Download pak01_dir.vpk
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          mkdir -p ~/cs2_files
+          echo "game/csgo/pak01_dir.vpk" > /tmp/filelist_dir.txt
+          DepotDownloader \
+            -app 730 \
+            -depot 2347770 \
+            -username "$STEAM_USERNAME" \
+            -password "$STEAM_PASSWORD" \
+            -remember-password \
+            -dir ~/cs2_files \
+            -filelist /tmp/filelist_dir.txt
+
+      - name: Install vpk library
+        run: pip install vpk --break-system-packages
+
+      # ── Chunk detector ────────────────────────────────────────────────────────
+      # Reads every entry in the dir index, keeps only .vsvg_c ones, and records
+      # which _NNN.vpk archive index each one lives in via get_file_meta().
+      # archive_index 0x7fff = data is embedded directly in the dir file itself.
+      # Note: Source 2 compiled resources use a _c suffix, so SVGs are .vsvg_c
+      - name: Detect which chunks contain SVG_C files
+        id: chunks
+        run: |
+          python3 << 'PYEOF'
+          import vpk, json, os, sys
+
+          DIR_VPK = os.path.expanduser("~/cs2_files/game/csgo/pak01_dir.vpk")
+
+          if not os.path.exists(DIR_VPK):
+              print(f"ERROR: pak01_dir.vpk not found at {DIR_VPK}", file=sys.stderr)
+              sys.exit(1)
+
+          pak    = vpk.open(DIR_VPK)
+          needed = set()
+          total  = 0
+
+          # Sample extensions to help debug if the target extension is wrong
+          from collections import Counter
+          ext_counts = Counter(os.path.splitext(fp)[1] for fp in pak)
+          print("Top 20 extensions in VPK:")
+          for ext, count in ext_counts.most_common(20):
+              print(f"  {ext or '(none)'}: {count}")
+
+          first = True
+          for filepath in pak:
+              if not filepath.endswith(".vsvg_c"):
+                  continue
+              total += 1
+              meta = pak.get_file_meta(filepath)
+              if first:
+                  print(f"File meta keys: {list(meta.keys()) if hasattr(meta, 'keys') else type(meta)}")
+                  first = False
+              archive_idx = meta["archive_index"] if isinstance(meta, dict) else meta.archive_index
+              if archive_idx != 0x7fff:
+                  needed.add(archive_idx)
+
+          sorted_chunks = sorted(needed)
+          print(f"Found {total} SVG_C entries across chunks: {sorted_chunks}")
+
+          with open("/tmp/svg_chunks.json", "w") as f:
+              json.dump(sorted_chunks, f)
+
+          # One path per line for DepotDownloader -filelist
+          with open("/tmp/chunk_filelist.txt", "w") as f:
+              for idx in sorted_chunks:
+                  f.write(f"game/csgo/pak01_{idx:03d}.vpk\n")
+
+          print("Chunk filelist written to /tmp/chunk_filelist.txt")
+          PYEOF
+
+          CHUNKS=$(python3 -c "import json; print(','.join(str(c) for c in json.load(open('/tmp/svg_chunks.json'))))")
+          echo "chunk_list=$CHUNKS" >> $GITHUB_OUTPUT
+
+      # ── Step 2 — download only the required data chunks ─────────────────────
+      - name: Download required VPK chunks
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          DepotDownloader \
+            -app 730 \
+            -depot 2347770 \
+            -username "$STEAM_USERNAME" \
+            -password "$STEAM_PASSWORD" \
+            -remember-password \
+            -dir ~/cs2_files \
+            -filelist /tmp/chunk_filelist.txt
+
+      # ── SVG_C extraction ──────────────────────────────────────────────────────
+      # Dumps raw .vsvg_c compiled resource files out of the VPK first,
+      # then VRF CLI converts each one to a plain .svg file.
+      - name: Extract all SVG_C files from VPK
+        run: |
+          python3 << 'PYEOF'
+          import vpk, os
+
+          DIR_VPK = os.path.expanduser("~/cs2_files/game/csgo/pak01_dir.vpk")
+          OUT_DIR = "raw_vsvg_c"
+          pak     = vpk.open(DIR_VPK)
+          ok, skipped = 0, 0
+
+          for filepath in pak:
+              if not filepath.endswith(".vsvg_c"):
+                  continue
+              out_path = os.path.join(OUT_DIR, filepath)
+              os.makedirs(os.path.dirname(out_path), exist_ok=True)
+              try:
+                  with open(out_path, "wb") as f:
+                      f.write(pak[filepath].read())
+                  ok += 1
+              except Exception as e:
+                  print(f"  skip  {filepath}  ({e})")
+                  skipped += 1
+
+          print(f"\nDone — extracted {ok} SVG_C files, skipped {skipped}")
+          PYEOF
+
+      # ── VSVG → SVG conversion ─────────────────────────────────────────────────
+      # ValveResourceFormat CLI converts compiled .vsvg_c resource files
+      # back to plain .svg files.
+      # Releases: https://github.com/ValveResourceFormat/ValveResourceFormat
+      - name: Install VRF CLI
+        run: |
+          # Use the GitHub API to find the linux-x64 asset URL dynamically.
+          # The CLI binary was renamed from "Decompiler" to "CLI" in release 13.0,
+          # so we avoid hardcoding the filename and let the API tell us the right one.
+          ASSET_URL=$(curl -s https://api.github.com/repos/ValveResourceFormat/ValveResourceFormat/releases/latest \
+            | python3 -c "
+          import sys, json
+          assets = json.load(sys.stdin)['assets']
+          match = next((a['browser_download_url'] for a in assets if 'linux-x64' in a['name'] and a['name'].endswith('.zip')), None)
+          if not match:
+              sys.exit('No linux-x64 zip asset found in latest VRF release')
+          print(match)
+          ")
+
+          curl -sL "$ASSET_URL" -o /tmp/vrf.zip
+          unzip -q /tmp/vrf.zip -d /tmp/vrf
+          echo "VRF zip contents:"; find /tmp/vrf -maxdepth 1 -type f
+
+          # Binary may be named "CLI" (>=13.0) or "Decompiler" (<13.0)
+          VRF_BIN=$(find /tmp/vrf -maxdepth 1 -type f | grep -E "(CLI|Decompiler)" | head -1)
+          sudo mv "$VRF_BIN" /usr/local/bin/vrf-cli
+          sudo chmod +x /usr/local/bin/vrf-cli
+
+      - name: Convert VSVG to SVG
+        run: |
+          vrf-cli \
+            --input raw_vsvg_c/ \
+            --output extracted_svgs/ \
+            --recursive \
+            --threads 4
+
+      # ── Upload artifact ───────────────────────────────────────────────────────
+      - name: Upload SVGs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cs2-svgs-build-${{ steps.meta.outputs.build_id }}
+          path: extracted_svgs/
+          retention-days: 30
+
+      # ── Push SVGs to main ─────────────────────────────────────────────────────
+      # Copies freshly extracted files into cs2/ without deleting anything first.
+      # New files are added, changed files are updated, removed files are kept —
+      # so the full history of every build's assets accumulates over time.
+      - name: Push SVGs to main branch
+        run: |
+          BUILD="${{ steps.meta.outputs.build_id }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          git checkout main
+
+          # Copy over extracted files — no wipe, so old files are preserved
+          cp -r extracted_svgs/. ./cs2/
+
+          git add cs2/
+          git diff --cached --quiet || \
+            git commit -m "chore: CS2 build $BUILD — update SVG assets"
+          git push origin main
+
+      # ── Job summary ───────────────────────────────────────────────────────────
+      - name: Write job summary
+        run: |
+          SVG_COUNT=$(find extracted_svgs -name "*.svg" | wc -l)
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## CS2 SVG Extraction — Build ${{ steps.meta.outputs.build_id }}
+
+          | | |
+          |---|---|
+          | **Build ID** | \`${{ steps.meta.outputs.build_id }}\` |
+          | **VPK chunks used** | \`${{ steps.chunks.outputs.chunk_list }}\` |
+          | **SVGs extracted** | $SVG_COUNT |
+          | **Branch** | \`main\` |
+          EOF
