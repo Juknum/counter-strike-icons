@@ -1,0 +1,25 @@
+name: "All › Detect Build Updates"
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cs2:
+    name: Run CS2 update detector
+    uses: ./.github/workflows/cs2-update-detector.yml
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+
+  csgo:
+    needs: cs2 # to avoid concurrent pushes to main, since both workflows update files and push to main
+    name: Run CS:GO update detector
+    uses: ./.github/workflows/csgo-update-detector.yml
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}

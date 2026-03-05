@@ -1,0 +1,275 @@
+name: "CS:GO › 2. Extract SVGs"
+
+on:
+  workflow_call:
+    inputs:
+      build_id:
+        description: "CS:GO build ID to extract (leave blank to use last known)"
+        required: false
+        type: string
+    secrets:
+      STEAM_USERNAME:
+        description: "Steam username for DepotDownloader"
+        required: true
+      STEAM_PASSWORD:
+        description: "Steam password for DepotDownloader"
+        required: true
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: "CS:GO build ID to extract (leave blank to use last known)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    name: Detect chunks & extract SVGs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # ── Resolve build ID ─────────────────────────────────────────────────────
+      - name: Resolve build ID
+        id: meta
+        run: |
+          if [ -n "${{ inputs.build_id }}" ]; then
+            BUILD="${{ inputs.build_id }}"
+          else
+            BUILD=$(cat csgo_version.txt 2>/dev/null || echo "unknown")
+          fi
+          echo "build_id=$BUILD" >> $GITHUB_OUTPUT
+          echo "::notice::Extracting SVGs for build $BUILD"
+
+      # ── DepotDownloader setup ────────────────────────────────────────────────
+      # DepotDownloader is a standalone binary release, not a dotnet global tool.
+      # Releases: https://github.com/SteamRE/DepotDownloader/releases
+      - name: Install DepotDownloader
+        run: |
+          DD_VERSION=$(curl -s https://api.github.com/repos/SteamRE/DepotDownloader/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          curl -sL "https://github.com/SteamRE/DepotDownloader/releases/download/${DD_VERSION}/DepotDownloader-linux-x64.zip" \
+            -o /tmp/depotdownloader.zip
+          unzip -q /tmp/depotdownloader.zip -d /tmp/depotdownloader
+          sudo mv /tmp/depotdownloader/DepotDownloader /usr/local/bin/DepotDownloader
+          sudo chmod +x /usr/local/bin/DepotDownloader
+
+      # ── Step 1 — download the index only ─────────────────────────────────────
+      # pak01_dir.vpk is the VPK index file. We parse it first to find exactly
+      # which _NNN.vpk chunks hold .svg data before downloading anything else.
+      # Requires STEAM_USERNAME and STEAM_PASSWORD repo secrets
+      # (any free Steam account works — CS:GO is free-to-play so no ownership is required).
+      - name: Download pak01_dir.vpk
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          mkdir -p ~/csgo_files
+          # Filelist supports exact paths and regex lines prefixed with "regex:".
+          # Keep common exact paths first, then a broad regex fallback.
+          cat > /tmp/filelist_dir.txt << 'EOF'
+          csgo/pak01_dir.vpk
+          game/csgo/pak01_dir.vpk
+          regex:.*pak01_dir\.vpk$
+          EOF
+          DepotDownloader \
+            -app 4465480 \
+            -depot 731 \
+            -username "$STEAM_USERNAME" \
+            -password "$STEAM_PASSWORD" \
+            -remember-password \
+            -dir ~/csgo_files \
+            -filelist /tmp/filelist_dir.txt
+
+      - name: Locate pak01_dir.vpk path
+        run: |
+          DIR_VPK=$(find ~/csgo_files -type f -name pak01_dir.vpk | head -n1)
+
+          if [ -z "$DIR_VPK" ]; then
+            echo "ERROR: Could not locate pak01_dir.vpk after download"
+            echo "Files downloaded under ~/csgo_files:"
+            find ~/csgo_files -maxdepth 5 -type f | head -n 200
+            exit 1
+          fi
+
+          VPK_PREFIX=$(dirname "$DIR_VPK" | sed 's|^'$HOME'/csgo_files/||')
+
+          echo "Detected dir VPK at: $DIR_VPK"
+          echo "Detected VPK prefix: $VPK_PREFIX"
+
+          echo "DIR_VPK=$DIR_VPK" >> $GITHUB_ENV
+          echo "VPK_PREFIX=$VPK_PREFIX" >> $GITHUB_ENV
+
+      - name: Install vpk library
+        run: pip install vpk --break-system-packages
+
+      # ── Chunk detector ────────────────────────────────────────────────────────
+      # Reads every entry in the dir index, keeps only .svg files, and records
+      # which _NNN.vpk archive index each one lives in via get_file_meta().
+      # archive_index 0x7fff = data is embedded directly in the dir file itself.
+      - name: Detect which chunks contain SVG assets
+        id: chunks
+        run: |
+          python3 << 'PYEOF'
+          import vpk, json, os, sys
+
+          DIR_VPK = os.environ["DIR_VPK"]
+          VPK_PREFIX = os.environ["VPK_PREFIX"]
+
+          if not os.path.exists(DIR_VPK):
+              print(f"ERROR: pak01_dir.vpk not found at {DIR_VPK}", file=sys.stderr)
+              sys.exit(1)
+
+          pak = vpk.open(DIR_VPK)
+          needed = set()
+
+          # Sample extensions to help debug if the target extension is wrong
+          from collections import Counter
+          ext_counts = Counter(os.path.splitext(fp)[1] for fp in pak)
+          print("Top 20 extensions in VPK:")
+          for ext, count in ext_counts.most_common(20):
+              print(f"  {ext or '(none)'}: {count}")
+
+          total = 0
+
+          first = True
+          for filepath in pak:
+              if not filepath.endswith(".svg"):
+                  continue
+              total += 1
+              meta = pak.get_file_meta(filepath)
+              if first:
+                  print(f"File meta keys: {list(meta.keys()) if hasattr(meta, 'keys') else type(meta)}")
+                  first = False
+              archive_idx = meta["archive_index"] if isinstance(meta, dict) else meta.archive_index
+              if archive_idx != 0x7fff:
+                  needed.add(archive_idx)
+
+          sorted_chunks = sorted(needed)
+          print(f"Found {total} SVG entries across chunks: {sorted_chunks}")
+
+          if total == 0:
+              print("ERROR: No .svg assets found in this VPK", file=sys.stderr)
+              sys.exit(1)
+
+          with open("/tmp/svg_chunks.json", "w") as f:
+              json.dump(sorted_chunks, f)
+
+          # One path per line for DepotDownloader -filelist
+          with open("/tmp/chunk_filelist.txt", "w") as f:
+              for idx in sorted_chunks:
+                  f.write(f"{VPK_PREFIX}/pak01_{idx:03d}.vpk\n")
+
+          print("Chunk filelist written to /tmp/chunk_filelist.txt")
+          PYEOF
+
+          CHUNKS=$(python3 -c "import json; print(','.join(str(c) for c in json.load(open('/tmp/svg_chunks.json'))))")
+          echo "chunk_list=$CHUNKS" >> $GITHUB_OUTPUT
+
+      # ── Step 2 — download only the required data chunks ─────────────────────
+      - name: Download required VPK chunks
+        if: steps.chunks.outputs.chunk_list != ''
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          DepotDownloader \
+            -app 4465480 \
+            -depot 731 \
+            -username "$STEAM_USERNAME" \
+            -password "$STEAM_PASSWORD" \
+            -remember-password \
+            -dir ~/csgo_files \
+            -filelist /tmp/chunk_filelist.txt
+
+      # ── SVG extraction ────────────────────────────────────────────────────────
+      # CS:GO stores plain .svg assets directly in the VPK.
+      - name: Extract SVG assets from VPK
+        run: |
+          python3 << 'PYEOF'
+          import vpk, os
+
+          DIR_VPK = os.environ["DIR_VPK"]
+          OUT_DIR = "extracted_svgs"
+
+          pak = vpk.open(DIR_VPK)
+          ok, skipped = 0, 0
+
+          for filepath in pak:
+              if not filepath.endswith(".svg"):
+                  continue
+
+              out_path = os.path.join(OUT_DIR, filepath)
+              os.makedirs(os.path.dirname(out_path), exist_ok=True)
+              try:
+                  with open(out_path, "wb") as f:
+                      f.write(pak[filepath].read())
+                  ok += 1
+              except Exception as e:
+                  print(f"  skip  {filepath}  ({e})")
+                  skipped += 1
+
+          print(f"\nDone — extracted {ok} SVG files, skipped {skipped}")
+          PYEOF
+
+      # ── Upload artifact ───────────────────────────────────────────────────────
+      - name: Upload SVGs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csgo-svgs-build-${{ steps.meta.outputs.build_id }}
+          path: extracted_svgs/
+          retention-days: 15
+
+      # ── Push SVGs to main ─────────────────────────────────────────────────────
+      # Copies freshly extracted files into csgo/ without deleting anything first.
+      # New files are added, changed files are updated, removed files are kept —
+      # so the full history of every build's assets accumulates over time.
+      - name: Push SVGs to main branch
+        run: |
+          BUILD="${{ steps.meta.outputs.build_id }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          # Copy over extracted files — no wipe, so old files are preserved
+          mkdir -p csgo
+          cp -r extracted_svgs/. ./csgo/
+
+          git add csgo/
+          git diff --cached --quiet || \
+            git commit -m "chore: CSGO build #$BUILD updated SVG assets"
+          git push origin main
+
+      # ── Job summary ───────────────────────────────────────────────────────────
+      - name: Write job summary
+        run: |
+          SVG_COUNT=$(find extracted_svgs -name "*.svg" | wc -l)
+          CHUNK_LIST="${{ steps.chunks.outputs.chunk_list }}"
+
+          if [ -n "$CHUNK_LIST" ]; then
+            CHUNKS_DISPLAY=$(printf '%s' "$CHUNK_LIST" | sed 's/,/`, `/g')
+            CHUNKS_DISPLAY="\`$CHUNKS_DISPLAY\`"
+          else
+            CHUNKS_DISPLAY="none"
+          fi
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## CS:GO SVG Extraction — Build ${{ steps.meta.outputs.build_id }}
+
+          | | |
+          |---|---|
+          | **Build ID** | \`${{ steps.meta.outputs.build_id }}\` |
+          | **VPK chunks used** | $CHUNKS_DISPLAY |
+          | **SVGs extracted** | $SVG_COUNT |
+          | **Branch** | \`main\` |
+          EOF
