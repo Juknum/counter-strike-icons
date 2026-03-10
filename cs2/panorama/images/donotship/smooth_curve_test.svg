@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	width="350" height="350" viewBox="0 0 700 700">
+    <path d="M100,500
+             C150,550 250,450 200,400
+             S250,250 300,300
+             s150,-50 100,-100
+             s50,-150 100,-100
+             S650,50 600,0"
+    fill="none" stroke="#F00" stroke-width="2px" />
+</svg>
+
