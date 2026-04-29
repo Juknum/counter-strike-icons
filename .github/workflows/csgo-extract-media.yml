@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
 
@@ -220,7 +220,7 @@ jobs:
 
       # ── Upload artifact ───────────────────────────────────────────────────────
       - name: Upload SVGs as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: csgo-svgs-build-${{ steps.meta.outputs.build_id }}
           path: extracted_svgs/
