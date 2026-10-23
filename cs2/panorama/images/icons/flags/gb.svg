@@ -4,7 +4,7 @@
 <mask id="mask0_2_149" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="65" height="43">
 <rect x="0.973022" y="0.150009" width="63.8269" height="42" fill="#C4C4C4"/>
 </mask>
-<g mask="url(#mask0_2_149)">
+<g>
 <rect x="27.8341" y="-1.4312" width="9.96647" height="45.476" fill="white"/>
 <rect width="7.61812" height="76.5309" transform="matrix(0.371155 0.928571 -0.846342 0.53264 63.0759 -2.40997)" fill="white"/>
 <rect width="3.67207" height="77.654" transform="matrix(0.369953 0.92905 -0.847243 0.531205 64.59 -0.155655)" fill="#BE0027"/>

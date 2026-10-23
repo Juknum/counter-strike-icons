@@ -3,8 +3,6 @@
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 width="20.104px" height="32px" viewBox="0 0 20.104 32" enable-background="new 0 0 20.104 32" xml:space="preserve">
-<g id="Layer_1_1_">
-</g>
 <g>
 	<circle fill="#FFFFFF" cx="10.064" cy="4.219" r="2.713"/>
 	<path fill="#FFFFFF" d="M15.931,11.424l-3.375-3.701c-0.127-0.141-0.287-0.227-0.453-0.288c-0.188-0.097-0.393-0.167-0.619-0.167
@@ -15,16 +13,6 @@
 		c0.223,0.245,0.531,0.371,0.838,0.371c0.271,0,0.545-0.099,0.762-0.296C16.32,12.602,16.355,11.885,15.931,11.424z"/>
 </g>
 <g>
-	<path fill="#FFFFFF" d="M10.534,29.221"/>
-	<path fill="#FFFFFF" d="M10.534,28.5"/>
-	<path fill="#FFFFFF" d="M10.534,31.074"/>
-	<path fill="#FFFFFF" d="M10.534,23.607"/>
-	<path fill="#FFFFFF" d="M10.534,24.452"/>
-	<path fill="#FFFFFF" d="M10.534,23.814"/>
-	<path fill="#FFFFFF" d="M10.534,27.268"/>
-	<path fill="#FFFFFF" d="M10.534,26.472"/>
-	<path fill="#FFFFFF" d="M10.534,25.639"/>
-	<path fill="#FFFFFF" d="M10.534,24.866"/>
 	<rect x="10.534" y="27.268" fill="#FFFFFF" width="3.023" height="1.232"/>
 	<rect x="10.534" y="24.452" fill="#FFFFFF" width="3.014" height="0.414"/>
 	<rect x="10.534" y="23.607" fill="#FFFFFF" width="3.023" height="0.207"/>
@@ -32,16 +20,6 @@
 	<rect x="10.534" y="25.639" fill="#FFFFFF" width="3.023" height="0.833"/>
 </g>
 <g>
-	<path fill="#FFFFFF" d="M6.429,29.237"/>
-	<path fill="#FFFFFF" d="M6.429,28.517"/>
-	<path fill="#FFFFFF" d="M6.429,31.091"/>
-	<path fill="#FFFFFF" d="M6.429,23.624"/>
-	<path fill="#FFFFFF" d="M6.429,24.469"/>
-	<path fill="#FFFFFF" d="M6.429,23.831"/>
-	<path fill="#FFFFFF" d="M6.429,27.284"/>
-	<path fill="#FFFFFF" d="M6.429,26.488"/>
-	<path fill="#FFFFFF" d="M6.429,25.656"/>
-	<path fill="#FFFFFF" d="M6.429,24.884"/>
 	<rect x="6.429" y="27.284" fill="#FFFFFF" width="3.234" height="1.232"/>
 	<rect x="6.429" y="24.469" fill="#FFFFFF" width="3.224" height="0.415"/>
 	<rect x="6.429" y="23.624" fill="#FFFFFF" width="3.234" height="0.207"/>

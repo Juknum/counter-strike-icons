@@ -2,8 +2,6 @@
 <!-- Generator: Adobe Illustrator 23.0.2, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="32px"
 	 height="13px" viewBox="0 0 32 13" enable-background="new 0 0 32 13" xml:space="preserve">
-<g id="Layer_4">
-</g>
 <g id="Layer_1">
 	<radialGradient id="SVGID_1_" cx="16.1026" cy="6.5133" r="13.016" gradientUnits="userSpaceOnUse">
 		<stop  offset="0" style="stop-color:#F1F2F2"/>
@@ -1394,7 +1392,5 @@
 	</radialGradient>
 	<polygon fill="url(#SVGID_74_)" points="10.102,1.672 12.862,1.742 11.843,2.683 13.98,2.737 12.804,3.954 10.335,3.891 
 		11.101,2.97 8.927,2.942 	"/>
-</g>
-<g id="guides">
 </g>
 </svg>

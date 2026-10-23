@@ -4,7 +4,7 @@
 <mask id="mask0_2_278" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="1" y="0" width="64" height="43">
 <rect x="1.06039" y="0.339523" width="63.7395" height="42.5544" fill="#D50F17"/>
 </mask>
-<g mask="url(#mask0_2_278)">
+<g>
 <path d="M28.9413 0.339523H36.2584L33.4942 21.6167H31.6681L28.9413 0.339523Z" fill="#ECDA3B"/>
 <path d="M36.2584 42.8939L28.9413 42.8939L31.7056 21.6167L33.5317 21.6167L36.2584 42.8939Z" fill="#ECDA3B"/>
 <path d="M64.7999 17.9582L64.7999 25.2752L32.5999 22.511L32.5999 20.6849L64.7999 17.9582Z" fill="#ECDA3B"/>
